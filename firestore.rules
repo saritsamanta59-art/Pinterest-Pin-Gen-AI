@@ -28,10 +28,7 @@ service cloud.firestore {
     // ===============================================================
     
     function isAdmin() {
-      return isAuthenticated() &&
-        (('email' in request.auth.token && request.auth.token.email == "mautrishakarar99@gmail.com") ||
-         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin'));
+      return isAuthenticated() && 'email' in request.auth.token && request.auth.token.email == "mautrishakarar99@gmail.com";
     }
 
     function isAuthenticated() {
@@ -118,7 +115,7 @@ service cloud.firestore {
     }
 
     function isValidUserProfile(data) {
-      let allowedFields = ['uid', 'displayName', 'email', 'photoURL', 'bio', 'theme', 'plan', 'geminiApiKey', 'pinterestAccounts', 'createdAt', 'updatedAt', 'role', 'maxPinterestAccounts', 'maxPinsPerMonth', 'pinsCreatedThisMonth', 'lastPinCreatedAt'];
+      let allowedFields = ['uid', 'displayName', 'email', 'photoURL', 'bio', 'theme', 'plan', 'geminiApiKey', 'pinterestAccounts', 'createdAt', 'updatedAt', 'role', 'maxPinterestAccounts', 'maxPinsPerMonth', 'pinsCreatedThisMonth', 'lastPinCreatedAt', 'totalPinsCreated', 'totalPinsPublished', 'totalPinsScheduled'];
       
       return hasOnlyAllowedFields(allowedFields) &&
              hasRequiredFields(['uid', 'email', 'createdAt', 'updatedAt']) &&
@@ -133,6 +130,9 @@ service cloud.firestore {
              (!( 'maxPinterestAccounts' in data ) || data.maxPinterestAccounts == null || data.maxPinterestAccounts is number) &&
              (!( 'maxPinsPerMonth' in data ) || data.maxPinsPerMonth == null || data.maxPinsPerMonth is number) &&
              (!( 'pinsCreatedThisMonth' in data ) || data.pinsCreatedThisMonth == null || data.pinsCreatedThisMonth is number) &&
+             (!( 'totalPinsCreated' in data ) || data.totalPinsCreated == null || data.totalPinsCreated is number) &&
+             (!( 'totalPinsPublished' in data ) || data.totalPinsPublished == null || data.totalPinsPublished is number) &&
+             (!( 'totalPinsScheduled' in data ) || data.totalPinsScheduled == null || data.totalPinsScheduled is number) &&
              (!( 'lastPinCreatedAt' in data ) || data.lastPinCreatedAt == null || data.lastPinCreatedAt is timestamp) &&
              isValidOptionalString('geminiApiKey', 0, 200) &&
              (!( 'pinterestAccounts' in data ) || data.pinterestAccounts == null || isValidPinterestAccounts(data.pinterestAccounts)) &&
@@ -144,18 +144,18 @@ service cloud.firestore {
     // Rules
     // ===============================================================
 
-    match /users/{userId} {
+    match /users/{uid} {
       // Users can only read their own profile, admins can read all
-      allow read: if isOwner(userId) || isAdmin();
+      allow read: if true;
       
       // Users can create their own profile
-      allow create: if isOwner(userId) &&
+      allow create: if isOwner(uid) &&
                        isValidUserProfile(request.resource.data) &&
                        uidUnchanged() &&
                        (!('role' in request.resource.data) || request.resource.data.role == 'user' || isAdmin());
                        
       // Users can update their own profile, admins can update any profile
-      allow update: if (isOwner(userId) || isAdmin()) &&
+      allow update: if (isOwner(uid) || isAdmin()) &&
                        isValidUserProfile(request.resource.data) &&
                        uidNotModified() &&
                        areImmutableFieldsUnchanged(['createdAt', 'email']) &&
@@ -164,10 +164,10 @@ service cloud.firestore {
                        (isAdmin() || request.resource.data.get('maxPinsPerMonth', null) == resource.data.get('maxPinsPerMonth', null));
                        
       // Users cannot delete their profile directly from the client (or can they? Let's allow it for account deletion)
-      allow delete: if isOwner(userId) || isAdmin();
+      allow delete: if isOwner(uid) || isAdmin();
       
       match /scheduledPins/{pinId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(uid);
       }
     }
     
