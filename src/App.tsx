@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { GoogleGenAI } from "@google/genai";
-import { serverTimestamp, collection, getDocs, addDoc, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore';
+import { serverTimestamp, collection, getDocs, addDoc, deleteDoc, doc, query, where, orderBy, limit, updateDoc, startAfter } from 'firebase/firestore';
 import { db } from './firebase';
 import { useAuth } from './contexts/AuthContext';
 import { 
@@ -30,7 +30,8 @@ import {
   Mail,
   Lock,
   Settings,
-  Shield
+  Shield,
+  BarChart3
 } from 'lucide-react';
 
 // --- Font Options ---
@@ -101,7 +102,6 @@ export default function App() {
   const authWindowRef = useRef(null);
   
   const getApiKey = async () => {
-    // @ts-ignore
     return profile?.geminiApiKey || undefined;
   };
   
@@ -139,7 +139,9 @@ export default function App() {
   const [scheduleDate, setScheduleDate] = useState(formatDateTimeLocal(tomorrow));
   const [publishImmediately, setPublishImmediately] = useState(true);
   const [scheduledPins, setScheduledPins] = useState([]);
-  const [showScheduledPins, setShowScheduledPins] = useState(false);
+  const [lastVisiblePin, setLastVisiblePin] = useState<any>(null);
+  const [loadingPins, setLoadingPins] = useState(false);
+  const [hasMorePins, setHasMorePins] = useState(true);
 
   // Sync accounts with profile
   useEffect(() => {
@@ -151,73 +153,48 @@ export default function App() {
     }
   }, [profile?.pinterestAccounts]);
 
-  const fetchScheduledPins = async (token) => {
-    if (!profile?.uid) return;
+  const fetchScheduledPins = async (token, loadMore = false) => {
+    if (!profile?.uid || loadingPins || (!hasMorePins && loadMore)) return;
+    
+    setLoadingPins(true);
     try {
-      const q = query(collection(db, 'users', profile.uid, 'scheduledPins'), where('token', '==', token));
+      let q = query(
+        collection(db, 'users', profile.uid, 'scheduledPins'),
+        where('token', '==', token),
+        where('status', '==', 'pending'),
+        where('scheduledTime', '>', Date.now()),
+        orderBy('scheduledTime', 'asc'),
+        limit(10)
+      );
+
+      if (loadMore && lastVisiblePin) {
+        q = query(q, startAfter(lastVisiblePin));
+      }
+
       const snapshot = await getDocs(q);
-      const pins = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Filter out pins that have already been published
-      const now = Date.now();
-      const futurePins = pins.filter((p: any) => p.publishAt > now);
+      const newPins = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
-      // Publish and clean up past pins from Firestore
-      const pastPins = pins.filter((p: any) => p.publishAt <= now);
-      for (const p of pastPins) {
-        try {
-          if (p.payload && p.imageData) {
-            console.log(`Publishing scheduled pin ${p.id}...`);
-            const base64Data = p.imageData.split(',')[1];
-            const binaryString = window.atob(base64Data);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
-            }
-
-            const response = await fetch('/api/social/pins', {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${p.token}`,
-                'Content-Type': 'application/octet-stream',
-                'X-Pin-Payload': encodeURIComponent(JSON.stringify(p.payload))
-              },
-              body: bytes
-            });
-
-            if (!response.ok) {
-              const errText = await response.text();
-              console.error(`Failed to publish scheduled pin ${p.id}:`, errText);
-            } else {
-              console.log(`Successfully published scheduled pin ${p.id}`);
-              // Update pin count
-              try {
-                await updateProfileData({
-                  pinsCreatedThisMonth: (profile?.pinsCreatedThisMonth || 0) + 1,
-                  lastPinCreatedAt: serverTimestamp()
-                });
-              } catch (err) {
-                console.error("Failed to update pin count", err);
-              }
-            }
-          }
-          await deleteDoc(doc(db, 'users', profile.uid, 'scheduledPins', p.id));
-        } catch (e) {
-          console.error("Failed to process scheduled pin", e);
-        }
+      if (loadMore) {
+        setScheduledPins(prev => [...prev, ...newPins] as any);
+      } else {
+        setScheduledPins(newPins as any);
       }
       
-      setScheduledPins(futurePins.sort((a: any, b: any) => a.publishAt - b.publishAt) as any);
+      setLastVisiblePin(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMorePins(snapshot.docs.length === 10);
     } catch (e) {
       console.error("Failed to fetch scheduled pins", e);
+    } finally {
+      setLoadingPins(false);
     }
   };
 
   const deleteScheduledPin = async (id, token) => {
     if (!profile?.uid) return;
     try {
-      const pin = scheduledPins.find(p => p.id === id);
-      if (pin && pin.pinId && pin.pinId !== 'scheduled') {
-        // Delete from Pinterest (if it was somehow created there)
+      const pin = scheduledPins.find((p: any) => p.id === id) as any;
+      if (pin && pin.pinId) {
+        // Delete from Pinterest
         await fetch(`/api/social/pins/${pin.pinId}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
@@ -225,7 +202,7 @@ export default function App() {
       }
       
       await deleteDoc(doc(db, 'users', profile.uid, 'scheduledPins', id));
-      setScheduledPins(prev => prev.filter(p => p.id !== id));
+      setScheduledPins(prev => prev.filter((p: any) => p.id !== id));
     } catch (e) {
       console.error("Failed to delete scheduled pin", e);
     }
@@ -235,12 +212,6 @@ export default function App() {
     const activeAccount = accounts.find(a => a.id === activeAccountId);
     if (activeAccount?.token) {
       fetchScheduledPins(activeAccount.token);
-      
-      const interval = setInterval(() => {
-        fetchScheduledPins(activeAccount.token);
-      }, 60000); // Check every minute
-      
-      return () => clearInterval(interval);
     }
   }, [activeAccountId, accounts]);
 
@@ -405,7 +376,7 @@ export default function App() {
     } catch (e: any) {
         console.error(`Image gen failed for index ${index}`, e);
         if (e.message?.includes("Forbidden") || e.message?.includes("403")) {
-          setErrorMsg(`Image generation failed (403 Forbidden). Please ensure your Gemini API Key is correct, has the Generative Language API enabled, and does not have restrictive HTTP referrer/IP restrictions blocking this app's URL.`);
+          setErrorMsg(`Image generation failed (403 Forbidden). Please ensure your Gemini API Key is from a Google Cloud project with billing enabled, as image generation models require a paid tier.`);
         } else {
           setErrorMsg(`Image generation failed: ${e.message}`);
         }
@@ -595,7 +566,7 @@ export default function App() {
   };
 
   const handlePinterestConnectClick = async () => {
-    const defaultMax = profile?.plan === 'pro' ? 20 : 10;
+    const defaultMax = profile?.plan === 'pro' ? 20 : 1;
     const maxAccounts = profile?.maxPinterestAccounts !== undefined ? profile.maxPinterestAccounts : defaultMax;
     
     if (accounts.length >= maxAccounts) {
@@ -637,7 +608,9 @@ export default function App() {
       authWindowRef.current = null;
     }
     
-    const maxAccounts = profile?.plan === 'pro' ? 20 : 10;
+    const defaultMax = profile?.plan === 'pro' ? 20 : 1;
+    const maxAccounts = profile?.maxPinterestAccounts !== undefined ? profile.maxPinterestAccounts : defaultMax;
+    
     if (accounts.length >= maxAccounts) {
       setErrorMsg(`Your current plan allows up to ${maxAccounts} Pinterest account${maxAccounts > 1 ? 's' : ''}. Please upgrade to add more.`);
       setIsAuthenticating(false);
@@ -809,35 +782,7 @@ export default function App() {
         setIsScheduling(false);
         return;
       }
-      
-      const readableDate = scheduleDateObj.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true });
-      
-      try {
-        if (profile?.uid) {
-          await addDoc(collection(db, 'users', profile.uid, 'scheduledPins'), {
-            pinId: 'scheduled',
-            publishAt: scheduleDateObj.getTime(),
-            title: payload.title || '',
-            description: payload.description || '',
-            board_id: payload.board_id || '',
-            token: activeAccount.token,
-            payload: payload,
-            imageData: imageData,
-            createdAt: serverTimestamp()
-          });
-        }
-        
-        setSuccessMessage(`Pin scheduled on ${activeAccount.name} for ${readableDate}!`);
-        fetchScheduledPins(activeAccount.token);
-        setScheduleSuccess(true);
-        setTimeout(() => setScheduleSuccess(false), 5000);
-      } catch (err: any) {
-        console.error("Failed to save scheduled pin to Firestore", err);
-        setErrorMsg(`Failed to schedule pin: ${err.message}`);
-      } finally {
-        setIsScheduling(false);
-      }
-      return;
+      payload.publish_at = scheduleDateObj.toISOString();
     }
 
     console.log(`Submitting to Pinterest API on behalf of ${activeAccount.name}...`);
@@ -874,15 +819,47 @@ export default function App() {
 
       const result = await response.json();
       
-      setSuccessMessage(`Pin published successfully on ${activeAccount.name}!`);
+      if (publishImmediately) {
+        setSuccessMessage(`Pin published successfully on ${activeAccount.name}!`);
+      } else {
+        const readableDate = scheduleDateObj.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true });
+        setSuccessMessage(`Pin scheduled on ${activeAccount.name} for ${readableDate}!`);
+        
+        if (profile?.uid) {
+          try {
+            await addDoc(collection(db, 'users', profile.uid, 'scheduledPins'), {
+              userId: profile.uid,
+              status: 'pending',
+              scheduledTime: scheduleDateObj.getTime(),
+              pinId: result.id || 'scheduled',
+              title: payload.title || '',
+              description: payload.description || '',
+              board_id: payload.board_id || '',
+              token: activeAccount.token,
+              createdAt: serverTimestamp()
+            });
+          } catch (err) {
+            console.error("Failed to save scheduled pin to Firestore", err);
+          }
+        }
+        
+        fetchScheduledPins(activeAccount.token);
+      }
       setScheduleSuccess(true);
       
       // Update pin count
       try {
-        await updateProfileData({
+        const updates: any = {
           pinsCreatedThisMonth: currentCount + 1,
+          totalPinsCreated: (profile?.totalPinsCreated || 0) + 1,
           lastPinCreatedAt: serverTimestamp()
-        });
+        };
+        if (publishImmediately) {
+          updates.totalPinsPublished = (profile?.totalPinsPublished || 0) + 1;
+        } else {
+          updates.totalPinsScheduled = (profile?.totalPinsScheduled || 0) + 1;
+        }
+        await updateProfileData(updates);
       } catch (err) {
         console.error("Failed to update pin count", err);
       }
@@ -1258,6 +1235,13 @@ export default function App() {
               <User className="w-5 h-5" />
             </button>
             <button 
+              onClick={() => navigate('/analytics')}
+              className="text-slate-500 hover:text-slate-900 transition-colors"
+              title="Analytics"
+            >
+              <BarChart3 className="w-5 h-5" />
+            </button>
+            <button 
               onClick={() => navigate('/settings')}
               className="text-slate-500 hover:text-slate-900 transition-colors"
               title="Settings"
@@ -1337,7 +1321,7 @@ export default function App() {
                 </div>
                 {profile?.plan !== 'pro' && (
                   <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
-                    <p className="text-xs text-amber-800 font-medium mb-2">Free plan limited to 10 accounts.</p>
+                    <p className="text-xs text-amber-800 font-medium mb-2">Free plan limited to 1 account.</p>
                     <button 
                       onClick={async () => {
                         try {
@@ -1722,10 +1706,26 @@ export default function App() {
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">
                       Target Account
                     </label>
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 flex items-center gap-2">
-                      <User className="w-4 h-4 text-[#E60023]" />
-                      {accounts.find(a => a.id === activeAccountId)?.name || 'Unknown Account'}
-                    </div>
+                    {accounts.length > 1 ? (
+                      <div className="relative">
+                        <select
+                          value={activeAccountId}
+                          onChange={(e) => setActiveAccountId(e.target.value)}
+                          className="w-full p-3 pl-10 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-slate-700 focus:border-[#E60023] focus:outline-none appearance-none cursor-pointer"
+                        >
+                          {accounts.map((acc) => (
+                            <option key={acc.id} value={acc.id}>{acc.name}</option>
+                          ))}
+                        </select>
+                        <User className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                        <ChevronRight className="w-4 h-4 text-slate-400 absolute right-3 top-3.5 rotate-90" />
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 flex items-center gap-2">
+                        <User className="w-4 h-4 text-[#E60023]" />
+                        {accounts.find(a => a.id === activeAccountId)?.name || 'Unknown Account'}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -1818,14 +1818,50 @@ export default function App() {
                           {scheduleSuccess ? (publishImmediately ? 'Published' : 'Scheduled') : (publishImmediately ? 'Publish Pin Now' : 'Schedule Pin')}
                         </button>
                     </div>
-                    <div className="mt-2">
-                      <button
-                        onClick={() => setShowScheduledPins(true)}
-                        className="w-full p-3 rounded-xl font-bold text-sm text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
-                      >
-                        <Clock className="w-4 h-4" />
-                        View Scheduled Pins
-                      </button>
+                    {/* Scheduled Pins List */}
+                    <div className="mt-6 border-t border-slate-100 pt-6">
+                      <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2 mb-4">
+                        <Clock className="w-4 h-4 text-slate-500" />
+                        Scheduled Pins
+                      </h4>
+                      {scheduledPins.length === 0 ? (
+                        <p className="text-sm text-slate-500 text-center py-4">No pins scheduled for this account.</p>
+                      ) : (
+                        <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                          {scheduledPins.map(pin => (
+                            <div key={pin.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50">
+                              <div className="overflow-hidden">
+                                <h5 className="font-semibold text-slate-900 text-sm truncate">{pin.title || 'Untitled Pin'}</h5>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                  {new Date(pin.scheduledTime).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const activeAccount = accounts.find(a => a.id === activeAccountId);
+                                  if (activeAccount) deleteScheduledPin(pin.id, activeAccount.token);
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors shrink-0 ml-2"
+                                title="Cancel Scheduled Pin"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                          {hasMorePins && (
+                            <button
+                              onClick={() => {
+                                const activeAccount = accounts.find(a => a.id === activeAccountId);
+                                if (activeAccount) fetchScheduledPins(activeAccount.token, true);
+                              }}
+                              disabled={loadingPins}
+                              className="w-full py-2 text-sm text-slate-600 hover:text-slate-900 font-medium transition-colors"
+                            >
+                              {loadingPins ? 'Loading...' : 'Load More'}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1835,57 +1871,6 @@ export default function App() {
           </div>
         </div>
       </main>
-      
-      {/* Scheduled Pins Modal */}
-      {showScheduledPins && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <Clock className="w-5 h-5 text-red-600" />
-                Scheduled Pins
-              </h2>
-              <button 
-                onClick={() => setShowScheduledPins(false)}
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1">
-              {scheduledPins.length === 0 ? (
-                <div className="text-center py-12 text-slate-500">
-                  <Calendar className="w-12 h-12 mx-auto mb-4 text-slate-300" />
-                  <p>No pins scheduled for this account.</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {scheduledPins.map(pin => (
-                    <div key={pin.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-200 bg-slate-50">
-                      <div>
-                        <h3 className="font-bold text-slate-900">{pin.title || 'Untitled Pin'}</h3>
-                        <p className="text-sm text-slate-500 mt-1">
-                          Scheduled for: {new Date(pin.publishAt).toLocaleString()}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const activeAccount = accounts.find(a => a.id === activeAccountId);
-                          if (activeAccount) deleteScheduledPin(pin.id, activeAccount.token);
-                        }}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Cancel Scheduled Pin"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       <footer className="w-full max-w-[1600px] mx-auto px-6 py-8 text-center border-t border-slate-200 mt-12">
         <Link to="/privacypolicy" className="text-sm text-slate-500 hover:text-slate-800 transition-colors">

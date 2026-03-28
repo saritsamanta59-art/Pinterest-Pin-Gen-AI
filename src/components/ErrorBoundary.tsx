@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { formatErrorMessage } from '../utils';
 
 interface Props {
   children?: ReactNode;
@@ -38,7 +39,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             </div>
             <h2 className="text-xl font-semibold text-zinc-900 mb-2">Something went wrong</h2>
             <p className="text-zinc-500 text-sm mb-6">
-              {this.state.error?.message || 'An unexpected error occurred.'}
+              {formatErrorMessage(this.state.error)}
             </p>
             <button
               onClick={() => window.location.reload()}

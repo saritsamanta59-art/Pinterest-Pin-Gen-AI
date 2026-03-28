@@ -50,7 +50,7 @@ export default function Landing() {
             <div className="bg-red-600 p-2 rounded-lg">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-xl text-slate-900">PinScheduler</span>
+            <span className="font-bold text-xl text-slate-900">PinGenius AI</span>
           </div>
           <div className="flex items-center gap-4">
             {user ? (
@@ -151,7 +151,7 @@ export default function Landing() {
             <ul className="space-y-4 mb-8 flex-1">
               <li className="flex items-center gap-3">
                 <Check className="w-5 h-5 text-emerald-500 shrink-0" />
-                <span className="text-slate-700">10 Pinterest Accounts</span>
+                <span className="text-slate-700">1 Pinterest Account</span>
               </li>
               <li className="flex items-center gap-3">
                 <Check className="w-5 h-5 text-emerald-500 shrink-0" />

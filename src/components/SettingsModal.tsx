@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { X, Key, Save, Loader2, Trash2, AlertCircle } from 'lucide-react';
+import { formatErrorMessage } from '../utils';
 
 export default function SettingsModal({ isOpen, onClose, user, accounts, onRemoveAccount }) {
   const [apiKey, setApiKey] = useState('');
@@ -43,7 +44,7 @@ export default function SettingsModal({ isOpen, onClose, user, accounts, onRemov
       setSuccess('Settings saved successfully!');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
-      setError(err.message || 'Failed to save settings');
+      setError(formatErrorMessage(err) || 'Failed to save settings');
     } finally {
       setLoading(false);
     }
@@ -99,7 +100,7 @@ export default function SettingsModal({ isOpen, onClose, user, accounts, onRemov
           </form>
 
           <div className="pt-6 border-t border-zinc-100">
-            <h3 className="text-sm font-medium text-zinc-900 mb-3">Connected Pinterest Accounts ({accounts.length}/10)</h3>
+            <h3 className="text-sm font-medium text-zinc-900 mb-3">Connected Pinterest Accounts ({accounts.length})</h3>
             {accounts.length === 0 ? (
               <p className="text-sm text-zinc-500 italic">No accounts connected yet.</p>
             ) : (

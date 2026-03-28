@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, UserProfile } from '../contexts/AuthContext';
 import { ArrowLeft, Users, Save, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { collection, getDocs, doc, updateDoc, deleteField } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, deleteField, query, limit, startAfter, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
+import { formatErrorMessage } from '../utils';
 
 export default function Admin() {
   const { isAdmin, loading: authLoading } = useAuth();
@@ -13,6 +14,45 @@ export default function Admin() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [lastVisibleUser, setLastVisibleUser] = useState<any>(null);
+  const [hasMoreUsers, setHasMoreUsers] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const fetchUsers = async (loadMore = false) => {
+    if (loadMore) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
+    
+    try {
+      let q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(20));
+      
+      if (loadMore && lastVisibleUser) {
+        q = query(q, startAfter(lastVisibleUser));
+      }
+      
+      const querySnapshot = await getDocs(q);
+      const usersData: UserProfile[] = [];
+      querySnapshot.forEach((doc) => {
+        usersData.push(doc.data() as UserProfile);
+      });
+      
+      if (loadMore) {
+        setUsers(prev => [...prev, ...usersData]);
+      } else {
+        setUsers(usersData);
+      }
+      
+      setLastVisibleUser(querySnapshot.docs[querySnapshot.docs.length - 1] || null);
+      setHasMoreUsers(querySnapshot.docs.length === 20);
+    } catch (err: any) {
+      setError(formatErrorMessage(err) || 'Failed to fetch users');
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     if (authLoading) return;
@@ -20,21 +60,6 @@ export default function Admin() {
       navigate('/app');
       return;
     }
-
-    const fetchUsers = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, 'users'));
-        const usersData: UserProfile[] = [];
-        querySnapshot.forEach((doc) => {
-          usersData.push(doc.data() as UserProfile);
-        });
-        setUsers(usersData);
-      } catch (err: any) {
-        setError(err.message || 'Failed to fetch users');
-      } finally {
-        setLoading(false);
-      }
-    };
 
     fetchUsers();
   }, [isAdmin, authLoading, navigate]);
@@ -64,7 +89,7 @@ export default function Admin() {
       setSuccess('User updated successfully');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
-      setError(err.message || 'Failed to update user');
+      setError(formatErrorMessage(err) || 'Failed to update user');
     } finally {
       setSavingId(null);
     }
@@ -140,6 +165,18 @@ export default function Admin() {
                 )}
               </tbody>
             </table>
+            {hasMoreUsers && users.length > 0 && (
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-center">
+                <button
+                  onClick={() => fetchUsers(true)}
+                  disabled={loadingMore}
+                  className="px-6 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium flex items-center gap-2"
+                >
+                  {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {loadingMore ? 'Loading...' : 'Load More Users'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </main>
@@ -150,6 +187,7 @@ export default function Admin() {
 function UserRow({ user, onSave, isSaving }: { user: UserProfile, onSave: (updates: Partial<UserProfile>) => void, isSaving: boolean }) {
   const [maxAccounts, setMaxAccounts] = useState(user.maxPinterestAccounts?.toString() || '');
   const [maxPins, setMaxPins] = useState(user.maxPinsPerMonth?.toString() || '');
+  const [plan, setPlan] = useState(user.plan || 'free');
 
   const handleSave = () => {
     const updates: Partial<UserProfile> | any = {};
@@ -159,12 +197,15 @@ function UserRow({ user, onSave, isSaving }: { user: UserProfile, onSave: (updat
     if (maxPins !== '') updates.maxPinsPerMonth = parseInt(maxPins, 10);
     else updates.maxPinsPerMonth = deleteField();
 
+    if (plan !== user.plan) updates.plan = plan;
+
     onSave(updates);
   };
 
   const hasChanges = 
     (maxAccounts === '' ? undefined : parseInt(maxAccounts, 10)) !== user.maxPinterestAccounts ||
-    (maxPins === '' ? undefined : parseInt(maxPins, 10)) !== user.maxPinsPerMonth;
+    (maxPins === '' ? undefined : parseInt(maxPins, 10)) !== user.maxPinsPerMonth ||
+    plan !== (user.plan || 'free');
 
   return (
     <tr className="hover:bg-slate-50/50 transition-colors">
@@ -173,18 +214,23 @@ function UserRow({ user, onSave, isSaving }: { user: UserProfile, onSave: (updat
         <div className="text-slate-500 text-xs mt-0.5">{user.email}</div>
       </td>
       <td className="px-6 py-4">
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-          user.plan === 'pro' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-slate-100 text-slate-700 border border-slate-200'
-        }`}>
-          {user.plan === 'pro' ? 'Pro' : 'Free'}
-        </span>
+        <select
+          value={plan}
+          onChange={(e) => setPlan(e.target.value as 'free' | 'pro')}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium border outline-none focus:ring-1 focus:ring-red-500 ${
+            plan === 'pro' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-700 border-slate-200'
+          }`}
+        >
+          <option value="free">Free</option>
+          <option value="pro">Pro</option>
+        </select>
       </td>
       <td className="px-6 py-4">
         <input 
           type="number" 
           value={maxAccounts}
           onChange={(e) => setMaxAccounts(e.target.value)}
-          placeholder={user.plan === 'pro' ? '20 (default)' : '10 (default)'}
+          placeholder={plan === 'pro' ? '20 (default)' : '1 (default)'}
           className="w-32 px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none"
           min="0"
         />
@@ -194,7 +240,7 @@ function UserRow({ user, onSave, isSaving }: { user: UserProfile, onSave: (updat
           type="number" 
           value={maxPins}
           onChange={(e) => setMaxPins(e.target.value)}
-          placeholder={user.plan === 'pro' ? 'Unlimited' : '100 (default)'}
+          placeholder={plan === 'pro' ? 'Unlimited' : '100 (default)'}
           className="w-32 px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none"
           min="0"
         />

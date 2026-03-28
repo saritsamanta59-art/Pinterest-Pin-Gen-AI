@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Settings as SettingsIcon, Key, Save, Loader2, AlertCircle, Check, ArrowLeft, Clock, Calendar, X } from 'lucide-react';
-import { collection, getDocs, deleteDoc, doc, query, where } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, query, where, limit, updateDoc, startAfter, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
+import { formatErrorMessage } from '../utils';
 
 export default function Settings() {
   const { profile, updateProfileData } = useAuth();
@@ -16,6 +17,8 @@ export default function Settings() {
   
   const [scheduledPins, setScheduledPins] = useState<any[]>([]);
   const [loadingPins, setLoadingPins] = useState(false);
+  const [lastVisiblePin, setLastVisiblePin] = useState<any>(null);
+  const [hasMorePins, setHasMorePins] = useState(true);
 
   useEffect(() => {
     if (profile?.geminiApiKey) {
@@ -23,52 +26,56 @@ export default function Settings() {
     }
   }, [profile]);
 
-  useEffect(() => {
-    const fetchAllScheduledPins = async () => {
-      if (!profile?.uid || !profile?.pinterestAccounts || profile.pinterestAccounts.length === 0) return;
+  const fetchAllScheduledPins = async (loadMore = false) => {
+    if (!profile?.uid || !profile?.pinterestAccounts || profile.pinterestAccounts.length === 0) return;
+    if (loadingPins || (!hasMorePins && loadMore)) return;
+    
+    setLoadingPins(true);
+    try {
+      let allPins: any[] = [];
       
-      setLoadingPins(true);
-      try {
-        let allPins: any[] = [];
-        
-        const q = query(collection(db, 'users', profile.uid, 'scheduledPins'));
-        const snapshot = await getDocs(q);
-        const pins = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        const now = Date.now();
-        const futurePins = pins.filter((p: any) => p.publishAt > now);
-        
-        // Clean up past pins
-        const pastPins = pins.filter((p: any) => p.publishAt <= now);
-        for (const p of pastPins) {
-          try {
-            await deleteDoc(doc(db, 'users', profile.uid, 'scheduledPins', p.id));
-          } catch (e) {
-            console.error("Failed to clean up past scheduled pin", e);
-          }
-        }
-        
-        // Map account details
-        allPins = futurePins.map((p: any) => {
-          const account = profile.pinterestAccounts.find((acc: any) => acc.token === p.token);
-          return {
-            ...p,
-            accountName: account ? account.name : 'Unknown Account',
-            accountId: account ? account.id : '',
-            token: p.token
-          };
-        });
-        
-        // Sort by publishAt date
-        allPins.sort((a, b) => a.publishAt - b.publishAt);
-        setScheduledPins(allPins);
-      } catch (e) {
-        console.error("Failed to fetch scheduled pins", e);
-      } finally {
-        setLoadingPins(false);
-      }
-    };
+      let q = query(
+        collection(db, 'users', profile.uid, 'scheduledPins'),
+        where('status', '==', 'pending'),
+        where('scheduledTime', '>', Date.now()),
+        orderBy('scheduledTime', 'asc'),
+        limit(20)
+      );
 
+      if (loadMore && lastVisiblePin) {
+        q = query(q, startAfter(lastVisiblePin));
+      }
+
+      const snapshot = await getDocs(q);
+      const pins = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // Map account details
+      allPins = pins.map((p: any) => {
+        const account = profile.pinterestAccounts.find((acc: any) => acc.token === p.token);
+        return {
+          ...p,
+          accountName: account ? account.name : 'Unknown Account',
+          accountId: account ? account.id : '',
+          token: p.token
+        };
+      });
+      
+      if (loadMore) {
+        setScheduledPins(prev => [...prev, ...allPins]);
+      } else {
+        setScheduledPins(allPins);
+      }
+      
+      setLastVisiblePin(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMorePins(snapshot.docs.length === 20);
+    } catch (e) {
+      console.error("Failed to fetch scheduled pins", e);
+    } finally {
+      setLoadingPins(false);
+    }
+  };
+
+  useEffect(() => {
     fetchAllScheduledPins();
   }, [profile?.pinterestAccounts]);
 
@@ -101,7 +108,7 @@ export default function Settings() {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
-      setError(err.message || 'Failed to save settings');
+      setError(formatErrorMessage(err) || 'Failed to save settings');
     } finally {
       setLoading(false);
     }
@@ -196,7 +203,7 @@ export default function Settings() {
                       <div>
                         <h3 className="font-bold text-slate-900">{pin.title || 'Untitled Pin'}</h3>
                         <p className="text-sm text-slate-500 mt-1">
-                          Scheduled for: {new Date(pin.publishAt).toLocaleString()}
+                          Scheduled for: {new Date(pin.scheduledTime).toLocaleString()}
                         </p>
                         <p className="text-xs text-slate-400 mt-1">
                           Account: {pin.accountName}
@@ -211,6 +218,15 @@ export default function Settings() {
                       </button>
                     </div>
                   ))}
+                  {hasMorePins && (
+                    <button
+                      onClick={() => fetchAllScheduledPins(true)}
+                      disabled={loadingPins}
+                      className="w-full py-3 text-sm text-slate-600 hover:text-slate-900 font-medium transition-colors bg-slate-100 hover:bg-slate-200 rounded-xl mt-4"
+                    >
+                      {loadingPins ? 'Loading...' : 'Load More'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>

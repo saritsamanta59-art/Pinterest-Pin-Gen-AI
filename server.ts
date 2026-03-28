@@ -4,6 +4,54 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
 
+const QUEUE_FILE = path.join(process.cwd(), 'scheduled_pins_queue.json');
+
+if (!fs.existsSync(QUEUE_FILE)) {
+  fs.writeFileSync(QUEUE_FILE, JSON.stringify([]));
+}
+
+function getQueue() {
+  try {
+    return JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8'));
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveQueue(queue: any[]) {
+  fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
+}
+
+setInterval(async () => {
+  const queue = getQueue();
+  const now = Date.now();
+  const pending = [];
+  const due = [];
+
+  for (const task of queue) {
+    if (new Date(task.publish_at).getTime() <= now) {
+      due.push(task);
+    } else {
+      pending.push(task);
+    }
+  }
+
+  if (due.length > 0) {
+    saveQueue(pending);
+    
+    for (const task of due) {
+      try {
+        console.log(`Publishing scheduled pin to ${task.targetUrl}`);
+        const response = await fetch(task.targetUrl, task.options);
+        const text = await response.text();
+        console.log(`Publish result: ${response.status} ${text}`);
+      } catch (e) {
+        console.error(`Failed to publish scheduled pin:`, e);
+      }
+    }
+  }
+}, 60000);
+
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || 'test';
 const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET || 'test';
 const PAYPAL_API_BASE = process.env.PAYPAL_API_BASE || 'https://api-m.sandbox.paypal.com';
@@ -243,21 +291,52 @@ async function startServer() {
         },
       };
 
+      if (req.method === 'DELETE' && targetPath.startsWith('/pins/scheduled_')) {
+        const scheduledId = targetPath.replace('/pins/', '');
+        console.log(`Intercepting DELETE for scheduled pin: ${scheduledId}`);
+        const queue = getQueue();
+        const newQueue = queue.filter(task => task.id !== scheduledId);
+        saveQueue(newQueue);
+        return new Response(JSON.stringify({ status: 'deleted' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
       if (req.headers['content-type'] === 'application/octet-stream') {
         const payloadStr = req.headers['x-pin-payload'] as string;
         if (payloadStr) {
           const payload = JSON.parse(decodeURIComponent(payloadStr));
           
-          if (payload.publish_at) {
-            console.log('Received publish_at:', payload.publish_at);
-            console.log('Parsed time:', new Date(payload.publish_at).getTime());
-            console.log('Current time:', Date.now());
-            console.log('Is future?', new Date(payload.publish_at).getTime() > Date.now());
-          }
-          
           payload.media_source.data = req.body.toString('base64');
           options.body = JSON.stringify(payload);
           (options.headers as Record<string, string>)['Content-Type'] = 'application/json';
+          
+          if (payload.publish_at) {
+            const publishTime = new Date(payload.publish_at).getTime();
+            if (publishTime > Date.now()) {
+              console.log('Intercepting scheduled pin for', payload.publish_at);
+              const queue = getQueue();
+              const scheduledId = 'scheduled_' + Date.now();
+              
+              // Remove publish_at from the payload so Pinterest doesn't reject it when we publish it later
+              const payloadWithoutPublishAt = { ...payload };
+              delete payloadWithoutPublishAt.publish_at;
+              const optionsWithoutPublishAt = { ...options, body: JSON.stringify(payloadWithoutPublishAt) };
+
+              queue.push({
+                id: scheduledId,
+                publish_at: payload.publish_at,
+                targetUrl,
+                options: optionsWithoutPublishAt
+              });
+              saveQueue(queue);
+              return new Response(JSON.stringify({ id: scheduledId, status: 'scheduled' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+              });
+            }
+          }
         }
       } else {
         if (req.headers['content-type']) {

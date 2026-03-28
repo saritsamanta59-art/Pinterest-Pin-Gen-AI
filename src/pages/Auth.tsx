@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Sparkles, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../firebase';
+import { formatErrorMessage } from '../utils';
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -74,7 +75,7 @@ export default function Auth() {
         navigate('/app');
       }
     } catch (err: any) {
-      let errorMessage = err.message || 'Failed to authenticate with Pinterest';
+      let errorMessage = formatErrorMessage(err) || 'Failed to authenticate with Pinterest';
       if (err.code === 'auth/operation-not-allowed') {
         errorMessage = 'Email/Password authentication must be enabled in the Firebase Console (Authentication > Sign-in method) to use Pinterest login.';
       }
@@ -158,7 +159,7 @@ export default function Auth() {
         }
       }
     } catch (err: any) {
-      let errorMessage = err.message || 'Failed to authenticate';
+      let errorMessage = formatErrorMessage(err) || 'Failed to authenticate';
       if (err.code === 'auth/operation-not-allowed') {
         errorMessage = 'Email/Password authentication is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method).';
       } else if (err.code === 'auth/email-already-in-use') {
@@ -185,7 +186,7 @@ export default function Auth() {
       await sendPasswordResetEmail(auth, email);
       setResetSent(true);
     } catch (err: any) {
-      setError(err.message || 'Failed to send password reset email.');
+      setError(formatErrorMessage(err) || 'Failed to send password reset email.');
     } finally {
       setLoading(false);
     }
@@ -208,7 +209,7 @@ export default function Auth() {
         navigate('/app');
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to authenticate with Google');
+      setError(formatErrorMessage(err) || 'Failed to authenticate with Google');
       setLoading(false);
     }
   };
@@ -239,7 +240,7 @@ export default function Auth() {
         setLoading(false);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to start Pinterest authentication');
+      setError(formatErrorMessage(err) || 'Failed to start Pinterest authentication');
       setLoading(false);
     }
   };

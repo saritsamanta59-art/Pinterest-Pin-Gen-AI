@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged, signInWithPopup, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebase';
 
 export interface PinterestAccount {
@@ -23,6 +23,9 @@ export interface UserProfile {
   maxPinterestAccounts?: number;
   maxPinsPerMonth?: number;
   pinsCreatedThisMonth?: number;
+  totalPinsCreated?: number;
+  totalPinsPublished?: number;
+  totalPinsScheduled?: number;
   lastPinCreatedAt?: any;
   createdAt: any;
   updatedAt: any;
@@ -99,22 +102,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<Error | null>(null);
+
+  if (authError) {
+    throw authError;
+  }
 
   useEffect(() => {
-    let unsubscribeSnapshot: (() => void) | undefined;
-
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      
-      // Clean up previous snapshot listener if it exists
-      if (unsubscribeSnapshot) {
-        unsubscribeSnapshot();
-        unsubscribeSnapshot = undefined;
-      }
 
       if (currentUser) {
         const docRef = doc(db, 'users', currentUser.uid);
-        unsubscribeSnapshot = onSnapshot(docRef, async (docSnap) => {
+        try {
+          const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
             const data = docSnap.data() as UserProfile;
             setProfile(data);
@@ -136,13 +137,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               await setDoc(docRef, newProfile);
               setProfile(newProfile as UserProfile);
               setIsAdmin(newProfile.role === 'admin');
-            } catch (error) {
-              handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}`);
+            } catch (error: any) {
+              const errStr = error?.message || String(error);
+              if (errStr.includes('Quota') || errStr.includes('quota')) {
+                console.warn("Firestore Quota Exceeded on write. Using local fallback profile.");
+                setProfile(newProfile as UserProfile);
+                setIsAdmin(newProfile.role === 'admin');
+              } else {
+                try {
+                  handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}`);
+                } catch (e) {
+                  setAuthError(e as Error);
+                }
+              }
             }
           }
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
-        });
+        } catch (error: any) {
+          const errStr = error?.message || String(error);
+          if (errStr.includes('Quota') || errStr.includes('quota')) {
+            console.warn("Firestore Quota Exceeded. Using local fallback profile.");
+            setProfile({
+              uid: currentUser.uid,
+              email: currentUser.email || '',
+              displayName: currentUser.displayName || 'Demo User',
+              photoURL: currentUser.photoURL || '',
+              bio: 'Local fallback profile due to quota limit.',
+              theme: 'system',
+              plan: 'free',
+              role: currentUser.email === 'mautrishakarar99@gmail.com' ? 'admin' : 'user',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+            setIsAdmin(currentUser.email === 'mautrishakarar99@gmail.com');
+          } else {
+            try {
+              handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
+            } catch (e) {
+              setAuthError(e as Error);
+            }
+          }
+        }
         setLoading(false);
       } else {
         setProfile(null);
@@ -153,9 +187,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsubscribeAuth();
-      if (unsubscribeSnapshot) {
-        unsubscribeSnapshot();
-      }
     };
   }, []);
 
@@ -212,6 +243,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const updateProfileData = async (data: Partial<UserProfile>) => {
     if (!user) return;
+    
+    // Optimistic update
+    setProfile(prev => prev ? { ...prev, ...data } as UserProfile : null);
+    
     try {
       const docRef = doc(db, 'users', user.uid);
       const updatedData = {

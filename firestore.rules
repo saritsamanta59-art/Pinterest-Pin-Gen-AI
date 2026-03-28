@@ -29,7 +29,7 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() &&
-        (request.auth.token.email == "mautrishakarar99@gmail.com" ||
+        (('email' in request.auth.token && request.auth.token.email == "mautrishakarar99@gmail.com") ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin'));
     }
@@ -167,8 +167,16 @@ service cloud.firestore {
       allow delete: if isOwner(userId) || isAdmin();
       
       match /scheduledPins/{pinId} {
-        allow read, write: if isOwner(userId) || isAdmin();
+        allow read, write: if isOwner(userId);
       }
+    }
+    
+    // Keep root collection rules for backward compatibility during migration
+    match /scheduledPins/{pinId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.userId && request.auth.uid == request.resource.data.userId;
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
     }
   }
 }

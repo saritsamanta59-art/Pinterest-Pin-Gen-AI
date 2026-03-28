@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { ArrowLeft, User, Mail, Camera, Loader2, Check, Lock } from 'lucide-react';
 import { updateEmail, updatePassword } from 'firebase/auth';
 import { auth } from '../firebase';
+import { formatErrorMessage } from '../utils';
 
 export default function Profile() {
   const { profile, updateProfileData } = useAuth();
@@ -49,7 +50,7 @@ export default function Profile() {
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
-      setError(err.message || 'Failed to update profile');
+      setError(formatErrorMessage(err) || 'Failed to update profile');
     } finally {
       setIsSaving(false);
     }
@@ -99,7 +100,7 @@ export default function Profile() {
       if (err.code === 'auth/requires-recent-login') {
         setSecurityError('This operation is sensitive and requires recent authentication. Please log out and log back in before trying again.');
       } else {
-        setSecurityError(err.message || 'Failed to update security settings');
+        setSecurityError(formatErrorMessage(err) || 'Failed to update security settings');
       }
     } finally {
       setIsUpdatingSecurity(false);

@@ -3,6 +3,7 @@ import { auth, db } from '../firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { X, Mail, Lock, Loader2 } from 'lucide-react';
+import { formatErrorMessage } from '../utils';
 
 export default function AuthModal({ isOpen, onClose }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -34,7 +35,7 @@ export default function AuthModal({ isOpen, onClose }) {
       }
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Authentication failed');
+      setError(formatErrorMessage(err) || 'Authentication failed');
     } finally {
       setLoading(false);
     }
