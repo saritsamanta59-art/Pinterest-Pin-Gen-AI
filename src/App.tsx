@@ -102,7 +102,16 @@ export default function App() {
   const authWindowRef = useRef(null);
   
   const getApiKey = async () => {
-    return profile?.geminiApiKey || undefined;
+    // Priority 1: User's custom key from profile
+    if (profile?.geminiApiKey) return profile.geminiApiKey;
+    
+    // Priority 2: Platform-selected key
+    const aiWin = window as any;
+    if (aiWin.aistudio && await aiWin.aistudio.hasSelectedApiKey()) {
+      return (process.env as any).API_KEY;
+    }
+    
+    return undefined;
   };
   
   // --- Pinterest Credentials ---
@@ -234,7 +243,13 @@ export default function App() {
 
     const apiKey = await getApiKey();
     if (!apiKey) {
-      setErrorMsg('Please configure your Gemini API Key in Settings.');
+      const aiWin = window as any;
+      if (aiWin.aistudio) {
+        setErrorMsg('Please select a Gemini API Key to continue.');
+        await aiWin.aistudio.openSelectKey();
+      } else {
+        setErrorMsg('Please configure your Gemini API Key in Settings.');
+      }
       setIsGeneratingText(false);
       return;
     }
@@ -297,7 +312,7 @@ export default function App() {
     } catch (error: any) {
       console.error("Critical Failure:", error);
       if (error.message?.includes("Forbidden") || error.message?.includes("403")) {
-        setErrorMsg("API Key Error (403 Forbidden). Please check that your Gemini API Key is correct, has the Generative Language API enabled, and does not have restrictive HTTP referrer/IP restrictions blocking this app's URL.");
+        setErrorMsg("API Key Error (403 Forbidden). This usually means your API Key is from a project without billing enabled. Try using the 'Select Key from Google Cloud' option in Settings.");
       } else {
         setErrorMsg(`Generation failed: ${error.message}`);
       }
@@ -331,12 +346,21 @@ export default function App() {
 
     const apiKey = await getApiKey();
     if (!apiKey) {
-      setErrorMsg('Please configure your Gemini API Key in Settings to generate images.');
+      const aiWin = window as any;
+      if (aiWin.aistudio) {
+        setErrorMsg('Please select a Gemini API Key to generate images.');
+        await aiWin.aistudio.openSelectKey();
+      } else {
+        setErrorMsg('Please configure your Gemini API Key in Settings to generate images.');
+      }
       setLoadingImages(prev => ({ ...prev, [index]: false }));
       return;
     }
 
     try {
+        const apiKey = await getApiKey();
+        if (!apiKey) throw new Error("No API Key");
+        
         const ai = new GoogleGenAI({ apiKey });
         const finalPrompt = prompt || `Vertical photo of ${keyword}, aesthetic, high quality`;
         const imageResponse = await ai.models.generateContent({
@@ -376,7 +400,7 @@ export default function App() {
     } catch (e: any) {
         console.error(`Image gen failed for index ${index}`, e);
         if (e.message?.includes("Forbidden") || e.message?.includes("403")) {
-          setErrorMsg(`Image generation failed (403 Forbidden). Please ensure your Gemini API Key is from a Google Cloud project with billing enabled, as image generation models require a paid tier.`);
+          setErrorMsg(`Image generation failed (403 Forbidden). This usually means your API Key is from a project without billing enabled. Try using the "Select Key from Google Cloud" option in Settings.`);
         } else {
           setErrorMsg(`Image generation failed: ${e.message}`);
         }
@@ -397,7 +421,13 @@ export default function App() {
 
     const apiKey = await getApiKey();
     if (!apiKey) {
-      setErrorMsg('Please configure your Gemini API Key in Settings.');
+      const aiWin = window as any;
+      if (aiWin.aistudio) {
+        setErrorMsg('Please select a Gemini API Key to continue.');
+        await aiWin.aistudio.openSelectKey();
+      } else {
+        setErrorMsg('Please configure your Gemini API Key in Settings.');
+      }
       setIsGeneratingCta(false);
       return;
     }
@@ -444,7 +474,7 @@ export default function App() {
     } catch (error: any) {
       console.error("CTA Generation Failure:", error);
       if (error.message?.includes("Forbidden") || error.message?.includes("403")) {
-        setErrorMsg("API Key Error (403 Forbidden). Please check that your Gemini API Key is correct, has the Generative Language API enabled, and does not have restrictive HTTP referrer/IP restrictions blocking this app's URL.");
+        setErrorMsg("API Key Error (403 Forbidden). This usually means your API Key is from a project without billing enabled. Try using the 'Select Key from Google Cloud' option in Settings.");
       } else {
         setErrorMsg(`CTA Generation failed: ${error.message}`);
       }
@@ -597,7 +627,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('OAuth error:', error);
-      setErrorMsg('Failed to initiate Pinterest connection.');
+      setErrorMsg(`Failed to initiate Pinterest connection. Error: ${error instanceof Error ? error.message : String(error)}`);
       setIsAuthenticating(false);
     }
   };

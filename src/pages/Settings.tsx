@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Settings as SettingsIcon, Key, Save, Loader2, AlertCircle, Check, ArrowLeft, Clock, Calendar, X } from 'lucide-react';
+import { Settings as SettingsIcon, Key, Save, Loader2, AlertCircle, Check, ArrowLeft, Clock, Calendar, X, Sparkles } from 'lucide-react';
 import { collection, getDocs, deleteDoc, doc, query, where, limit, updateDoc, startAfter, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatErrorMessage } from '../utils';
@@ -156,13 +156,45 @@ export default function Settings() {
                 <p className="text-xs text-slate-500 mb-3">
                   Provide your own Google Gemini API key to generate pins. This key is stored securely in your profile.
                 </p>
-                <input 
-                  type="password" 
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full p-3 rounded-xl border border-slate-200 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm"
-                />
+                <div className="space-y-4">
+                  <input 
+                    type="password" 
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="AIzaSy..."
+                    className="w-full p-3 rounded-xl border border-slate-200 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm"
+                  />
+                  
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                      <div className="w-full border-t border-slate-200"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-white px-2 text-slate-500">Or use platform selection</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      const aiWin = window as any;
+                      if (aiWin.aistudio) {
+                        await aiWin.aistudio.openSelectKey();
+                        setSuccess(true);
+                        setTimeout(() => setSuccess(false), 3000);
+                      }
+                    }}
+                    className="w-full py-3 px-4 border-2 border-dashed border-slate-300 rounded-xl text-slate-600 hover:border-red-500 hover:text-red-600 hover:bg-red-50 transition-all flex items-center justify-center gap-2 font-medium"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Select Key from Google Cloud
+                  </button>
+                  <p className="text-[10px] text-slate-400 text-center">
+                    Requires a paid Google Cloud project with billing enabled. 
+                    <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-red-500 hover:underline ml-1">
+                      Learn about billing
+                    </a>
+                  </p>
+                </div>
               </div>
 
               <div className="pt-4 flex justify-end">

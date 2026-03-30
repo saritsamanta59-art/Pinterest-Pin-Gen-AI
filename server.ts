@@ -78,15 +78,32 @@ async function getPayPalAccessToken() {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Trust proxy is required for correct protocol detection behind Hostinger/Nginx proxies
+  app.set('trust proxy', true);
+  const PORT = process.env.PORT || 3000;
+
+  if (!process.env.APP_URL) {
+    console.warn("WARNING: APP_URL environment variable is not set. Redirect URIs will be generated dynamically based on request headers, which may be unreliable behind some proxies.");
+  }
+  if (!process.env.PINTEREST_APP_ID || !process.env.PINTEREST_APP_SECRET) {
+    console.warn("WARNING: Pinterest API credentials (PINTEREST_APP_ID or PINTEREST_APP_SECRET) are missing from environment variables. Pinterest features may not work correctly.");
+  }
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
   app.use(express.raw({ type: 'application/octet-stream', limit: '50mb' }));
 
   const getRedirectUri = (req: express.Request) => {
-    // Always use the APP_URL environment variable to get the URL of the container
-    let baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+    // Priority 1: APP_URL from environment
+    // Priority 2: Dynamic detection (works with trust proxy)
+    let baseUrl = process.env.APP_URL;
+    
+    if (!baseUrl) {
+      const host = req.get('host');
+      const protocol = req.protocol;
+      baseUrl = `${protocol}://${host}`;
+    }
+
     if (baseUrl.endsWith('/')) {
       baseUrl = baseUrl.slice(0, -1);
     }
@@ -187,6 +204,7 @@ async function startServer() {
   app.get("/api/auth/social/url", (req, res) => {
     const clientId = process.env.PINTEREST_APP_ID || "1550825";
     const redirectUri = getRedirectUri(req);
+    console.log("Requesting Pinterest Auth URL for Client ID:", clientId, "Redirect URI:", redirectUri);
     
     const url = `https://www.pinterest.com/oauth/?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pins:read,pins:write,boards:read,boards:write,user_accounts:read`;
 

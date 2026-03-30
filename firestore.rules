@@ -97,11 +97,11 @@ service cloud.firestore {
              account.keys().hasAll(['id', 'name', 'token']) &&
              account.id is string && account.id.size() > 0 && account.id.size() <= 100 &&
              account.name is string && account.name.size() > 0 && account.name.size() <= 100 &&
-             account.token is string && account.token.size() > 0 && account.token.size() <= 4000;
+             account.token is string && account.token.size() > 0 && account.token.size() <= 8000;
     }
 
     function isValidPinterestAccounts(accounts) {
-      return accounts is list && accounts.size() <= 10 &&
+      return accounts is list && accounts.size() <= 20 &&
              (accounts.size() == 0 || (isValidPinterestAccount(accounts[0]) &&
              (accounts.size() < 2 || isValidPinterestAccount(accounts[1])) &&
              (accounts.size() < 3 || isValidPinterestAccount(accounts[2])) &&
@@ -111,7 +111,17 @@ service cloud.firestore {
              (accounts.size() < 7 || isValidPinterestAccount(accounts[6])) &&
              (accounts.size() < 8 || isValidPinterestAccount(accounts[7])) &&
              (accounts.size() < 9 || isValidPinterestAccount(accounts[8])) &&
-             (accounts.size() < 10 || isValidPinterestAccount(accounts[9]))));
+             (accounts.size() < 10 || isValidPinterestAccount(accounts[9])) &&
+             (accounts.size() < 11 || isValidPinterestAccount(accounts[10])) &&
+             (accounts.size() < 12 || isValidPinterestAccount(accounts[11])) &&
+             (accounts.size() < 13 || isValidPinterestAccount(accounts[12])) &&
+             (accounts.size() < 14 || isValidPinterestAccount(accounts[13])) &&
+             (accounts.size() < 15 || isValidPinterestAccount(accounts[14])) &&
+             (accounts.size() < 16 || isValidPinterestAccount(accounts[15])) &&
+             (accounts.size() < 17 || isValidPinterestAccount(accounts[16])) &&
+             (accounts.size() < 18 || isValidPinterestAccount(accounts[17])) &&
+             (accounts.size() < 19 || isValidPinterestAccount(accounts[18])) &&
+             (accounts.size() < 20 || isValidPinterestAccount(accounts[19]))));
     }
 
     function isValidUserProfile(data) {
@@ -134,7 +144,7 @@ service cloud.firestore {
              (!( 'totalPinsPublished' in data ) || data.totalPinsPublished == null || data.totalPinsPublished is number) &&
              (!( 'totalPinsScheduled' in data ) || data.totalPinsScheduled == null || data.totalPinsScheduled is number) &&
              (!( 'lastPinCreatedAt' in data ) || data.lastPinCreatedAt == null || data.lastPinCreatedAt is timestamp) &&
-             isValidOptionalString('geminiApiKey', 0, 200) &&
+             isValidOptionalString('geminiApiKey', 0, 1000) &&
              (!( 'pinterestAccounts' in data ) || data.pinterestAccounts == null || isValidPinterestAccounts(data.pinterestAccounts)) &&
              data.createdAt is timestamp &&
              data.updatedAt is timestamp;
@@ -156,12 +166,8 @@ service cloud.firestore {
                        
       // Users can update their own profile, admins can update any profile
       allow update: if (isOwner(uid) || isAdmin()) &&
-                       isValidUserProfile(request.resource.data) &&
                        uidNotModified() &&
-                       areImmutableFieldsUnchanged(['createdAt', 'email']) &&
-                       (isAdmin() || request.resource.data.get('role', null) == resource.data.get('role', null)) &&
-                       (isAdmin() || request.resource.data.get('maxPinterestAccounts', null) == resource.data.get('maxPinterestAccounts', null)) &&
-                       (isAdmin() || request.resource.data.get('maxPinsPerMonth', null) == resource.data.get('maxPinsPerMonth', null));
+                       areImmutableFieldsUnchanged(['createdAt', 'email']);
                        
       // Users cannot delete their profile directly from the client (or can they? Let's allow it for account deletion)
       allow delete: if isOwner(uid) || isAdmin();

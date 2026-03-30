@@ -142,6 +142,7 @@ export default function Admin() {
                 <tr>
                   <th className="px-6 py-4">User</th>
                   <th className="px-6 py-4">Plan</th>
+                  <th className="px-6 py-4">Pinterest Accounts</th>
                   <th className="px-6 py-4">Max Pinterest Accounts</th>
                   <th className="px-6 py-4">Max Pins / Month</th>
                   <th className="px-6 py-4 text-right">Actions</th>
@@ -158,7 +159,7 @@ export default function Admin() {
                 ))}
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                    <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
                       No users found.
                     </td>
                   </tr>
@@ -224,6 +225,9 @@ function UserRow({ user, onSave, isSaving }: { user: UserProfile, onSave: (updat
           <option value="free">Free</option>
           <option value="pro">Pro</option>
         </select>
+      </td>
+      <td className="px-6 py-4 text-sm text-slate-600">
+        {user.pinterestAccounts?.length || 0}
       </td>
       <td className="px-6 py-4">
         <input 
